@@ -161,6 +161,7 @@
 #include <sys/dmu_objset.h>
 #include <sys/dmu_impl.h>
 #include <sys/dmu_tx.h>
+#include <sys/dbuf.h>
 #include <sys/ddi.h>
 #include <sys/sunddi.h>
 #include <sys/sunldi.h>
@@ -186,7 +187,6 @@
 #include <sys/zfeature.h>
 
 #include <linux/miscdevice.h>
-#include <linux/module_compat.h>
 
 #include "zfs_namecheck.h"
 #include "zfs_prop.h"
@@ -247,55 +247,6 @@ static int zfs_fill_zplprops_root(uint64_t, nvlist_t *, nvlist_t *,
     boolean_t *);
 int zfs_set_prop_nvlist(const char *, zprop_source_t, nvlist_t *, nvlist_t *);
 static int get_nvlist(uint64_t nvl, uint64_t size, int iflag, nvlist_t **nvp);
-
-#if defined(HAVE_DECLARE_EVENT_CLASS)
-void
-__dprintf(const char *file, const char *func, int line, const char *fmt, ...)
-{
-	const char *newfile;
-	size_t size = 4096;
-	char *buf = kmem_alloc(size, KM_PUSHPAGE);
-	char *nl;
-	va_list adx;
-
-	/*
-	 * Get rid of annoying prefix to filename.
-	 */
-	newfile = strrchr(file, '/');
-	if (newfile != NULL) {
-		newfile = newfile + 1; /* Get rid of leading / */
-	} else {
-		newfile = file;
-	}
-
-	va_start(adx, fmt);
-	(void) vsnprintf(buf, size, fmt, adx);
-	va_end(adx);
-
-	/*
-	 * Get rid of trailing newline.
-	 */
-	nl = strrchr(buf, '\n');
-	if (nl != NULL)
-		*nl = '\0';
-
-	/*
-	 * To get this data enable the zfs__dprintf trace point as shown:
-	 *
-	 * # Enable zfs__dprintf tracepoint, clear the tracepoint ring buffer
-	 * $ echo 1 > /sys/module/zfs/parameters/zfs_flags
-	 * $ echo 1 > /sys/kernel/debug/tracing/events/zfs/enable
-	 * $ echo 0 > /sys/kernel/debug/tracing/trace
-	 *
-	 * # Dump the ring buffer.
-	 * $ cat /sys/kernel/debug/tracing/trace
-	 */
-	DTRACE_PROBE4(zfs__dprintf,
-	    char *, newfile, char *, func, int, line, char *, buf);
-
-	kmem_free(buf, size);
-}
-#endif /* HAVE_DECLARE_EVENT_CLASS */
 
 static void
 history_str_free(char *buf)
@@ -418,6 +369,7 @@ zfs_secpolicy_none(zfs_cmd_t *zc, nvlist_t *innvl, cred_t *cr)
 static int
 zfs_secpolicy_read(zfs_cmd_t *zc, nvlist_t *innvl, cred_t *cr)
 {
+
 	if (INGLOBALZONE(curproc) ||
 	    zone_dataset_visible(zc->zc_name, NULL))
 		return (0);
@@ -428,6 +380,7 @@ zfs_secpolicy_read(zfs_cmd_t *zc, nvlist_t *innvl, cred_t *cr)
 static int
 zfs_dozonecheck_impl(const char *dataset, uint64_t zoned, cred_t *cr)
 {
+
 	int writable = 1;
 
 	/*
@@ -1552,6 +1505,151 @@ zfs_ioc_pool_destroy(zfs_cmd_t *zc)
 		zvol_remove_minors(zc->zc_name);
 	return (error);
 }
+
+void dmu_read_write(objset_t *os, uint64_t object,uint64_t offset,uint64_t size){
+
+	dmu_tx_t *tx;
+	int dmu_err;
+	int assign_err;
+	uint64_t txg;
+
+	void *buf=kmem_alloc(size, KM_PUSHPAGE);
+	//void *buf1=kmem_alloc(size, KM_PUSHPAGE);
+
+	// Read the contents of the object
+
+	dmu_err=dmu_read(os,object,offset,size,buf,DMU_READ_NO_PREFETCH);
+	#ifdef _KERNEL
+	printk("Contents of the file are:%s\r\n",(char*)buf);
+	#endif
+	tx = dmu_tx_create(os);
+	dmu_tx_hold_write(tx,object,offset,size);
+	assign_err = dmu_tx_assign(tx, TXG_NOWAIT);
+	txg=dmu_tx_get_txg(tx);
+    #ifdef _KERNEL
+	printk("Transaction group is %d\r\n",txg);
+    #endif
+				if (assign_err == 0) {
+						dmu_write(os,object, offset+1, size,buf, tx);
+						dmu_tx_commit(tx);
+						#ifdef _KERNEL
+						printk("Commiting Txg\r\n");
+						#endif
+				} else {
+						dmu_tx_abort(tx);
+						#ifdef _KERNEL
+						printk("Aborting Txg\r\n");
+						#endif
+				}
+	kmem_free(buf,size);
+	//kmem_free(buf1,size);
+
+
+}
+
+static void
+sync_object(objset_t *os, uint64_t object, int *print_header)
+{
+		dmu_buf_t *db = NULL;
+		dmu_object_info_t doi;
+		dnode_t *dn;
+		void *bonus = NULL;
+		size_t bsize = 0;
+		char iblk[32], dblk[32], lsize[32], asize[32], fill[32];
+		char bonus_size[32];
+		char aux[50];
+		int error;
+		int object_type=0;
+
+
+		if (object == 0) {
+				dn = DMU_META_DNODE(os);
+		} else {
+				error = dmu_bonus_hold(os, object, FTAG, &db);
+				//if (error)
+						//fatal("dmu_bonus_hold(%llu) failed, errno %u",
+							//			object, error);
+				bonus = db->db_data;
+
+				bsize = db->db_size;
+				dn = DB_DNODE((dmu_buf_impl_t *)db);
+		}
+		object_type=dn->dn_type;
+		if (db != NULL)
+				dmu_buf_rele(db, FTAG);
+		if (object_type==19)
+			dmu_read_write(os, object,0,2);
+
+}
+static void
+dump_dir(objset_t *os)
+{
+	uint64_t object, object_count;
+	int error,print_header = 1;
+	object = 0;
+	while ((error = dmu_object_next(os, &object, B_FALSE, 0)) == 0) {
+			//		(void) printf("--------------------4----------------\n");
+			//dump_object(os, object,&print_header);
+			//printf("object type is %d",object.dn_type);
+			sync_object(os, object,&print_header);
+			object_count++;
+	}
+
+}
+
+static int
+dump_one_dir(const char *dsname, void *arg)
+{
+	int error;
+	objset_t *os;
+
+	#ifdef _KERNEL
+	printk("Could not open %s, error %d\n", dsname, error);
+	#endif
+	 error = dmu_objset_hold(dsname, FTAG, &os);
+	//error = dmu_objset_own(dsname, DMU_OST_ZFS, B_FALSE, FTAG, &os);
+	if (error) {
+		 #ifdef _KERNEL
+		 printk("Could not open %s, error %d\n", dsname, error);
+		 #endif
+		return (0);
+	}
+	dump_dir(os);
+	dmu_objset_rele(os, FTAG);
+	//dmu_objset_disown(os, FTAG);
+	return (0);
+}
+
+static void
+dump_zpool(spa_t *spa)
+{
+	//dsl_pool_t *dp = spa_get_dsl(spa);
+    //dump_dir(dp->dp_meta_objset);
+	(void) dmu_objset_find(spa_name(spa), dump_one_dir,
+			    NULL, DS_FIND_SNAPSHOTS | DS_FIND_CHILDREN);
+}
+
+static int
+zfs_ioc_pool_movet1t2(zfs_cmd_t *zc)
+{
+	int error=0;
+	spa_t *spa;
+	//error = spa_destroy(zc->zc_name);
+	if ((spa = spa_lookup(zc->zc_name)) == NULL) {
+	#ifdef _KERNEL
+	printk("Error while retriving spa\r\n");
+	#endif
+	 }
+	dump_zpool(spa);
+ 	 #ifdef _KERNEL
+	printk("Move data from tier 1 to tier 2\r\n");
+	#endif
+	return (error);
+}
+
+
+/*ARGSUSED*/
+
 
 static int
 zfs_ioc_pool_import(zfs_cmd_t *zc)
@@ -5453,6 +5551,8 @@ zfs_ioctl_init(void)
 	 */
 	zfs_ioctl_register_pool(ZFS_IOC_POOL_DESTROY, zfs_ioc_pool_destroy,
 	    zfs_secpolicy_config, B_FALSE, POOL_CHECK_NONE);
+	zfs_ioctl_register_pool(ZFS_IOC_POOL_MOVET1T2, zfs_ioc_pool_movet1t2,
+		    zfs_secpolicy_config, B_FALSE, POOL_CHECK_NONE);
 	zfs_ioctl_register_pool(ZFS_IOC_POOL_EXPORT, zfs_ioc_pool_export,
 	    zfs_secpolicy_config, B_FALSE, POOL_CHECK_NONE);
 
