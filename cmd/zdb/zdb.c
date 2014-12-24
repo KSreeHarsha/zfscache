@@ -2189,6 +2189,7 @@ dump_one_dir(const char *dsname, void *arg)
 {
 	int error;
 	objset_t *os;
+	(void) printf("Could not open %s\n", dsname);
 
 	error = dmu_objset_own(dsname, DMU_OST_ANY, B_TRUE, FTAG, &os);
 	if (error) {
@@ -2940,7 +2941,8 @@ dump_zpool(spa_t *spa)
 		dump_metaslab_groups(spa);
 
 	if (dump_opt['d'] || dump_opt['i']) {
-		dump_dir(dp->dp_meta_objset);
+		printf("#############The os type is %d\r\n",dmu_objset_type(dp->dp_meta_objset));
+		/**dump_dir(dp->dp_meta_objset);
 		if (dump_opt['d'] >= 3) {
 			dump_bpobj(&spa->spa_deferred_bpobj,
 			    "Deferred frees", 0);
@@ -2956,7 +2958,7 @@ dump_zpool(spa_t *spa)
 				    "Pool dataset frees");
 			}
 			dump_dtl(spa->spa_root_vdev, 0);
-		}
+		}**/
 		(void) dmu_objset_find(spa_name(spa), dump_one_dir,
 		    NULL, DS_FIND_SNAPSHOTS | DS_FIND_CHILDREN);
 	}
