@@ -4743,8 +4743,8 @@ upgrade_version(zpool_handle_t *zhp, uint64_t version)
 		return (ret);
 
 	if (unsupp_fs) {
-		(void) printf(gettext("Upgrade not performed due to %d "
-		    "unsupported filesystems (max v%d).\n"),
+		(void) fprintf(stderr, gettext("Upgrade not performed due "
+		    "to %d unsupported filesystems (max v%d).\n"),
 		    unsupp_fs, (int) ZPL_VERSION);
 		return (1);
 	}
@@ -4958,7 +4958,7 @@ upgrade_one(zpool_handle_t *zhp, void *data)
 	int ret;
 
 	if (strcmp("log", zpool_get_name(zhp)) == 0) {
-		(void) printf(gettext("'log' is now a reserved word\n"
+		(void) fprintf(stderr, gettext("'log' is now a reserved word\n"
 		    "Pool 'log' must be renamed using export and import"
 		    " to upgrade.\n"));
 		return (1);
